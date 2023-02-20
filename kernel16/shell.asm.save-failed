@@ -1,0 +1,991 @@
+; Оработчики команд Shell
+[bits 16]
+    [org 0x100]
+    ;int 20h
+    jmp doShell
+
+null			DB 0
+plots			DB ".........",0	; для команды Help
+entr			DB "$ ",0		; Приглашение для ввода
+string0			DB "DOORS v.1.0 (c) 2022 Gor.Com",0
+string1			DB "Type 'help' for help.",0
+error1			DB "Syntax error.",0
+string			DB "GOR.COM DOORS",0
+loading			DB "Kernel 16-bit loaded",0
+                %include "kernel16\data.inc"
+command			times 128 DB 0	; Командная строка (128 символов)
+
+
+
+doShell:
+; Очистка экрана
+    ;mov     ah,3
+    ;int     0x21
+	call CLS
+
+    ; Вывод рамки
+    mov		cx,0101h
+	mov		dx,164Dh
+	call 	Ramka
+
+	; Вывод строки
+	lea		si,[string]
+	mov		dx,011Ah	; Координаты
+	call	Print16
+	; Вывод строки
+	lea		si,[loading]
+	mov		dx,0300h	; Координаты
+	call	Print16
+
+	push cs
+	pop es
+
+    ;WriteLn
+	lea		si,[string0]
+	mov     ah,0
+	int     0x21
+
+	;WriteLn
+	lea		si,[string1]
+	mov     ah,0
+	int     0x21
+
+Return_from_program:
+;---------------------------------------
+
+	; Выводим приглашение ко вводу - $ и ждем ввод строки
+opros:
+    ;Write
+	lea		si,[entr]
+	mov     ah,1
+	int     0x21
+
+opr1:
+    ;Input
+    lea	di,[command]
+    mov ah,2
+    int 0x21
+	; Сделать все введенные символы в командной строке заглавными
+	lea		di,[command]
+	call	UpperString
+	; Проверяем на пустую строку ввода
+	mov		al,[command]
+	or		al,al
+	je		opr1
+	; Выполняем введенную команду
+	call	doCommand
+	;mov		al,[quitFLG]
+	;or		al,al
+	jmp		opros
+
+	;ret
+
+
+; Выполнение команды ####################################################################
+doCommand:
+				lea		di,[ctable]
+dCmd3:			lea		si,[command]
+dCmd0:			mov		al,[si]
+				cmp		al,[di]
+				jne		dCmd1		; Команда не опознана
+				or		al,al
+				je		dCmd2		; Конец команды, команда опознана
+				inc		di
+				inc		si
+				jmp		dCmd0
+dCmd1:			inc		di
+				cmp		byte [di],0
+				jne		dCmd1
+				inc		di
+				inc		di
+				inc		di
+				cmp		byte [di],0
+				je		dCmd4
+				jmp		dCmd3		; Проверяем следующую команду
+dCmd2:			inc		di
+				cmp		byte [di],0
+				jne		dCmd2
+				inc		di
+				push	di
+				;WriteLn
+				lea		si,[null]
+				mov     ah,0
+                int     0x21
+				pop		di
+				mov		si,[di]
+				call	si
+				ret
+dCmd4:
+                ;WriteLn
+                lea		si,[null]
+                mov     ah,0
+                int     0x21
+				;WriteLn
+				lea		si,[error1]
+				mov     ah,0
+                int     0x21
+				ret
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+    ; Подключаем библиотеки
+    ;%include "kernel16\out16.asm"
+    ;%include "kernel16\in.asm"
+    %include "drivers16\disk.asm"
+    %include "kernel16\string.asm"
+    ;%include "kernel16\shell.asm"
+    ;%include "kernel16\pm.asm"
+
+
+
+
+; Выход из ОС ##########################################################################
+;doQuit:
+				;mov		byte [quitFLG],1
+				;ret
+
+
+; Страничка помощи #####################################################################
+doHelp:
+				lea		di,[ctable]
+doHelp0:		mov		si,di
+				push	di
+				mov		al,[di]
+				or		al,al
+				je		doHelp3
+				;Write
+				mov ah,1
+				int 0x21
+				;call	Write
+				lea		si,[plots]
+				;Write
+				mov ah,1
+				int 0x21
+				;call	Write
+				pop		di
+doHelp1:		inc		di
+				cmp		byte [di],0
+				jne		doHelp1
+				inc		di
+				push	di
+				mov		si,di
+				;Write
+				mov ah,1
+				int 0x21
+				;call	Write
+				lea		si,[null]
+				;Write
+				mov ah,0
+				int 0x21
+				;call	WriteLn
+				pop		di
+doHelp2:		inc		di
+				cmp		byte [di],0
+				jne		doHelp2
+				inc		di
+				inc		di
+				inc		di
+				jmp		doHelp0
+doHelp3:		pop	di
+				ret
+
+
+; Очистка экрана #######################################################################
+doCLS:
+				;CLS
+				mov     ah,3
+                int     0x21
+				ret
+
+
+; Переход в защищенный режим #######################################################################
+doWin:
+    ; Включаем адресную линию A20
+    call doSetA20
+
+    ; Читаем ядро 32 .text
+	mov	bx,0x1000
+	mov	cl,10  ; номер сектора
+	mov	dh,35  ; читает секторов
+	mov	dl,[boot_drive]
+	;call	DiskLoad
+
+	; Читаем ядро 32 .data
+	mov	bx,0x8E00
+	mov	cl,45  ; номер сектора
+	mov	dh,20  ; читает секторов
+	mov	dl,[boot_drive]
+	;call	DiskLoad
+
+    ; set 0x811B VESA 1280x1024 16M color vidmem=0xFD000000
+    ; set 0x8118 VESA 1024x768 16M color vidmem=0xFD000000
+    ; set 0x8112 VESA 640x480 16M color vidmem=0xFD000000
+    mov ax,0x4F02
+    mov bx,0x811B
+    int 0x10
+
+	call	switch_to_pm
+    ret
+
+
+
+; Получить статус A20 #######################################################################
+a20_str_en	DB "A20 Enable",0
+a20_str_dis	DB "A20 Disable",0
+
+doGetA20:
+    ; Через порт клавиатуры
+    ;mov     al,0xD0
+    ;out     0x64,al
+    ;call    wait_output
+
+    ;in  al,0x60
+    ;push ax
+    ;call wait_input
+
+    ;mov, al,0xD1
+    ;out 0x64,al
+    ;call wait_input
+
+    ;pop ax
+    ;or al,02
+    ;out 0x60,al
+
+    ;test al,2
+    ;jz a20_enable
+    ;jmp a20_disable
+
+    ; получить статус A20 в AL
+    mov ax,0x2402
+    int 0x15
+
+    cmp AL,01
+    jz  a20_enable
+    cmp AL,00
+    jz  a20_disable
+
+a20_enable:
+    ; Вывод строки
+	lea		si,[a20_str_en]
+	;WriteLn
+    mov     ah,0
+    int     0x21
+    ;call	WriteLn
+    ret
+a20_disable:
+    ; Вывод строки
+	lea		si,[a20_str_dis]
+	;WriteLn
+    mov     ah,0
+    int     0x21
+    ;call	WriteLn
+    ret
+
+; ожидание действия контроллера клавиатуры
+wait_input:
+    in  al,0x64
+    test al,2
+    jnz wait_input
+    ret
+wait_output:
+    in  al,0x64
+    test al,1
+    jnz wait_output
+    ret
+
+
+; Включить A20 #######################################################################
+doSetA20:
+    ; Enable A20
+    mov ax,0x2401
+    int 0x15
+
+    mov al,0xD1
+    out 0x64,al
+    mov al,0xDF
+    out 0x60,al
+
+    ;mov     al,0xD0
+    ;out     0x64,al
+    ;call    wait_output
+
+    ;in  al,0x60
+    ;push ax
+    ;call wait_input
+
+    ;mov al,0xD1
+    ;out 0x64,al
+    ;call wait_input
+
+    ;pop ax
+    ;or al,02
+    ;out 0x60,al
+
+    call doGetA20
+    ret
+
+
+; Выключить A20 #######################################################################
+doDisA20:
+    ; Выключить A20 в AL
+    mov ax,0x2400
+    int 0x15
+
+    mov al,0xD1
+    out 0x64,al
+    mov al,0xDD
+    out 0x60,al
+
+    ;mov     al,0xD0
+    ;out     0x64,al
+    ;call    wait_output
+
+    ;in  al,0x60
+    ;push ax
+    ;call wait_input
+
+    ;mov al,0xD1
+    ;out 0x64,al
+    ;call wait_input
+
+    ;pop ax
+    ;and al,1101b
+    ;out 0x60,al
+
+    call doGetA20
+    ret
+
+
+; Перезагрузка #######################################################################
+doReset:
+    ; Работают оба способа
+
+    ; Способ 1
+    ;JMP 0xFFFF:0000
+
+    ; Способ 2
+    mov al,0xFE
+    out 0x64,al
+    ret
+
+
+; Информация о VESA #######################################################################
+VESA_str_OK	DB "VESA OK",0
+VESA_str_ER	DB "VESA ERROR",0
+
+doVESA:
+
+    mov ax,0
+    mov es,ax
+    mov ax,0x4F01
+    mov cx,0x811B
+    mov di,0x8F00
+    int 0x10
+
+    cmp ax,0x4F
+    jne VESA_err
+
+    ; Вывод строки
+	lea		si,[VESA_str_OK]
+	;WriteLn
+    mov     ah,0
+    int     0x21
+    ;call	WriteLn
+    ret
+
+VESA_err:
+    ; Вывод строки
+	lea		si,[VESA_str_ER]
+	;WriteLn
+    mov     ah,0
+    int     0x21
+    ;call	WriteLn
+    ret
+
+
+; Чтение через FAT 16  ##########################################################
+ImageName DB "KERNEL16BIN"
+BPB_ADDRESS EQU 0x8F00
+ROOT_ADDRESS EQU 0x9100
+FILE_ADDR EQU 0x9300
+
+DiskReadFAT:
+
+    ; Читаем Boot Sector Partition 1
+    mov ax,0x0080;word[StartingLBA];0x0080 StartingLBA
+    mov cx,0x0001        ; число секторов
+    mov	bx,BPB_ADDRESS
+    call    ReadSect
+
+    ; Размер корневого каталога
+    mov ax,32   ;32 байта на запись
+    mul word [BPB_ADDRESS+0xB+6]
+    div word [BPB_ADDRESS+0xB]
+    xor cx,cx
+    mov cl,al
+
+    ;call	PRINT_WORD
+
+    ; Начало корневого каталога
+    xor ax,ax
+    mov al,byte [BPB_ADDRESS+0xB+5]
+    mul word [BPB_ADDRESS+0xB+11]
+    ;call	PRINT_WORD
+    add ax,word [BPB_ADDRESS+0xB+3]
+    add ax,0x0080;word [StartingLBA] ;StartingLBA
+
+    ;call	PRINT_WORD
+    ;ret
+
+    ; Читаем Корневой каталог
+    mov	bx,ROOT_ADDRESS
+    call    ReadSect
+
+    ; Вывод строки
+	;lea	si,[FAT_OK]
+    ;call	WriteLn
+
+
+
+
+LOAD_FAT:
+    ; Вывод строки
+	;lea	si,[FAT_OK]
+    ;call	WriteLn
+
+    ; Получаем размер FAT
+    xor ax,ax
+    mov al,byte [BPB_ADDRESS+0xB+5]
+    mul word [BPB_ADDRESS+0xB+11]
+    mov cx,ax
+
+    ; Начало FAT
+    mov ax,word [BPB_ADDRESS+0xB+3]
+    add ax,0x0080;word[StartingLBA] ;StartingLBA
+
+
+    ; Читаем FAT
+    push es
+    push FAT_SEG    ; читаем в следующий сегмент
+    pop es
+    mov cx,110;word [BPB_ADDRESS+0xB+11]        ; число секторов
+    mov	bx,FAT_ADDR;0x9300
+    call    ReadSect
+    pop es              ; восстанавливаем es
+
+    ; Вывод строки
+	;lea	si,[FAT_OK]
+    ;call	WriteLn
+
+    ;add ax,112
+
+    ; Читаем FAT
+    ;push word 0x2000    ; читаем в следующий сегмент
+    ;pop es
+    ;mov cx,10;word [BPB_ADDRESS+0xB+11]        ; число секторов
+    ;mov	bx,[FAT_ADDR];0x9300
+    ;call    ReadSect
+
+LoadFile:
+    ;xor ecx,ecx
+    ;push    ecx
+
+    ;push    bx
+    ;push    bp
+
+    ; Поиск файла в Корневом каталоге
+    mov cx,word [BPB_ADDRESS+0xB+6]
+    mov di,ROOT_ADDRESS
+loop_find:
+    push cx
+    mov cx,11
+    mov si,ImageName
+    push di
+    rep cmpsb
+    pop di
+    pop cx
+    je  LOAD_IMAGE
+    add di,32
+    loop loop_find
+    ;jmp FAILURE
+
+LOAD_IMAGE:
+    ; Сохраняем стартовый кластер найденного файла
+    mov dx,[di+0x001A]
+    mov word [Cluster],dx
+
+    ;mov ax,word [Cluster]
+    ;call	PRINT_WORD
+
+    ; Читаем кластер файла
+    mov ax,word [Cluster]
+    call ClusterLBA
+    xor cx,cx
+    mov cl,36;byte [BPB_ADDRESS+0xB+2]
+    mov	bx,FILE_ADDR
+    call    ReadSect
+
+
+
+
+
+
+
+    ret
+
+
+
+
+; SQLite #############################################################################
+doSQLite:
+
+ImageName2 DB "SQLITE  COM"
+Cluster DW 0
+FAT_OK	DB "FAT OK",0
+FAT_ER_BPB	DB "FAT ERROR BPB",0
+FAT_ER_ROOT	DB "FAT ERROR ROOT",0
+FAT_ER_FAT	DB "FAT ERROR FAT",0
+FAT_ER_FIND	DB "FAT ERROR FIND",0
+FAT_ER_FILE	DB "FAT ERROR FILE",0
+FAT_SEG EQU 0x1000
+FAT_ADDR EQU 0x0000
+FILE_SEG2 EQU 0x2000
+FILE_ADDR2 EQU 0x0100
+
+DiskReadFAT2:
+
+    ;DEBUG--------------------------------
+    pusha
+	mov ah,0x0e
+    mov al,'B'
+    int 0x10
+    popa
+	;jmp $
+	;-------------------------------------
+
+    push 0
+    pop es
+
+    push 0
+    pop fs
+
+
+    ; Читаем Boot Sector Partition 1
+    mov ax,0x0080;word[StartingLBA];0x0080 StartingLBA
+    mov cx,0x0001        ; число секторов
+    mov	bx,BPB_ADDRESS
+    call    ReadSect
+    cmp ah,00
+    jne FAILURE_BPB
+
+    ; Размер корневого каталога
+    mov ax,32   ;32 байта на запись
+    mul word [BPB_ADDRESS+0xB+6]
+    div word [BPB_ADDRESS+0xB]
+    xor cx,cx
+    mov cl,al
+
+    ;call	PRINT_WORD
+
+    ; Начало корневого каталога
+    xor ax,ax
+    mov al,byte [BPB_ADDRESS+0xB+5]
+    mul word [BPB_ADDRESS+0xB+11]
+    ;call	PRINT_WORD
+    add ax,word [BPB_ADDRESS+0xB+3]
+    add ax,0x0080;word [StartingLBA] ;StartingLBA
+
+    ;call	PRINT_WORD
+    ;ret
+
+    ; Читаем Корневой каталог
+    mov	bx,ROOT_ADDRESS
+    call    ReadSect
+    cmp ah,00
+    jne FAILURE_ROOT
+
+LOAD_FAT2:
+    ; Получаем размер FAT
+    xor ax,ax
+    mov al,byte [BPB_ADDRESS+0xB+5]
+    mul word [BPB_ADDRESS+0xB+11]
+    mov cx,ax
+
+    ; Начало FAT
+    mov ax,word [BPB_ADDRESS+0xB+3]
+    add ax,0x0080;word[StartingLBA] ;StartingLBA
+
+    ; Читаем FAT
+    push es
+    push FAT_SEG    ; читаем в следующий сегмент
+    pop es
+    mov cx,50;110;word [BPB_ADDRESS+0xB+11]        ; число секторов
+    mov	bx,FAT_ADDR;0x9300
+    call    ReadSect
+    pop es              ; восстанавливаем es
+    cmp ah,00
+    jne FAILURE_FAT
+
+    ;add ax,112
+
+    ; Читаем FAT
+    ;push word 0x2000    ; читаем в следующий сегмент
+    ;pop es
+    ;mov cx,10;word [BPB_ADDRESS+0xB+11]        ; число секторов
+    ;mov	bx,[FAT_ADDR];0x9300
+    ;call    ReadSect
+
+LoadFile2:
+    ; Поиск файла в Корневом каталоге
+    mov cx,word [BPB_ADDRESS+0xB+6]
+    mov di,ROOT_ADDRESS
+loop_find2:
+    push cx
+    mov cx,11
+    mov si,ImageName2
+    push di
+    rep cmpsb
+    pop di
+    pop cx
+    je  LOAD_IMAGE2
+    add di,32
+    loop loop_find2
+    jmp FAILURE_FIND
+
+LOAD_IMAGE2:
+    ; Сохраняем стартовый кластер найденного файла
+    mov dx,[di+0x001A]
+    mov word [Cluster],dx
+
+    ;mov ax,word [Cluster]
+    ;call	PRINT_WORD
+
+    ; Читаем кластер файла
+    push es
+    push FILE_SEG2    ; читаем в следующий сегмент
+    pop es
+    mov ax,word [Cluster]
+    call ClusterLBA
+    xor cx,cx
+    mov cl,10;byte [BPB_ADDRESS+0xB+2]
+    mov	bx,0x0100;0x0100;FILE_ADDR2
+    call    ReadSect
+    cmp ah,00
+    jne FAILURE_FILE
+    xor ax,ax
+    mov word [es:0xFFFE],ax
+    mov ax,0x20CD
+    mov word [es:0x0000],ax
+    mov ax,cs;-------------------------
+    mov word [es:0x0016],ax
+
+
+    pop es
+
+
+
+    push FILE_SEG2
+    pop ds
+    push FILE_SEG2
+    pop ss
+    push FILE_SEG2
+    pop fs
+    push FILE_SEG2
+    pop gs
+    push FILE_SEG2
+    pop es
+
+
+    mov	bp,0xFFFE	; Устанавливаем адрес стека
+    mov	sp,bp
+
+
+    jmp FILE_SEG2:0x0100
+
+    ret
+
+FAILURE_BPB:
+    ; Вывод строки
+	lea		si,[FAT_ER_BPB]
+	;WriteLn
+    mov     ah,0
+    int     0x21
+    ;call	WriteLn
+    ret
+
+FAILURE_ROOT:
+    ; Вывод строки
+	lea		si,[FAT_ER_ROOT]
+	;WriteLn
+    mov     ah,0
+    int     0x21
+    ;call	WriteLn
+    ret
+
+FAILURE_FAT:
+    ; Вывод строки
+	lea		si,[FAT_ER_FAT]
+	;WriteLn
+    mov     ah,0
+    int     0x21
+    ;call	WriteLn
+    ret
+
+FAILURE_FIND:
+    ; Вывод строки
+	lea		si,[FAT_ER_FIND]
+	;WriteLn
+    mov     ah,0
+    int     0x21
+    ;call	WriteLn
+    ret
+
+FAILURE_FILE:
+    ; Вывод строки
+	lea		si,[FAT_ER_FILE]
+	;WriteLn
+    mov     ah,0
+    int     0x21
+    ;call	WriteLn
+    pop es
+    ret
+
+
+; SQLite #############################################################################
+doBasic:
+
+ImageName3 DB "BASIC   COM"
+;Cluster DW 0
+;FAT_OK	DB "FAT OK",0
+;FAT_ER_BPB	DB "FAT ERROR BPB",0
+;FAT_ER_ROOT	DB "FAT ERROR ROOT",0
+;FAT_ER_FAT	DB "FAT ERROR FAT",0
+;FAT_ER_FIND	DB "FAT ERROR FIND",0
+;FAT_ER_FILE	DB "FAT ERROR FILE",0
+;FAT_SEG EQU 0x1000
+;FAT_ADDR EQU 0x0000
+;FILE_SEG2 EQU 0x2000
+;FILE_ADDR2 EQU 0x0100
+
+DiskReadFAT3:
+
+    ;DEBUG--------------------------------
+    pusha
+	mov ah,0x0e
+    mov al,'B'
+    int 0x10
+    popa
+	;jmp $
+	;-------------------------------------
+
+    push 0
+    pop es
+
+    push 0
+    pop fs
+
+
+    ; Читаем Boot Sector Partition 1
+    mov ax,0x0080;word[StartingLBA];0x0080 StartingLBA
+    mov cx,0x0001        ; число секторов
+    mov	bx,BPB_ADDRESS
+    call    ReadSect
+    cmp ah,00
+    jne FAILURE_BPB
+
+    ; Размер корневого каталога
+    mov ax,32   ;32 байта на запись
+    mul word [BPB_ADDRESS+0xB+6]
+    div word [BPB_ADDRESS+0xB]
+    xor cx,cx
+    mov cl,al
+
+    ;call	PRINT_WORD
+
+    ; Начало корневого каталога
+    xor ax,ax
+    mov al,byte [BPB_ADDRESS+0xB+5]
+    mul word [BPB_ADDRESS+0xB+11]
+    ;call	PRINT_WORD
+    add ax,word [BPB_ADDRESS+0xB+3]
+    add ax,0x0080;word [StartingLBA] ;StartingLBA
+
+    ;call	PRINT_WORD
+    ;ret
+
+    ; Читаем Корневой каталог
+    mov	bx,ROOT_ADDRESS
+    call    ReadSect
+    cmp ah,00
+    jne FAILURE_ROOT
+
+LOAD_FAT3:
+    ; Получаем размер FAT
+    xor ax,ax
+    mov al,byte [BPB_ADDRESS+0xB+5]
+    mul word [BPB_ADDRESS+0xB+11]
+    mov cx,ax
+
+    ; Начало FAT
+    mov ax,word [BPB_ADDRESS+0xB+3]
+    add ax,0x0080;word[StartingLBA] ;StartingLBA
+
+    ; Читаем FAT
+    push es
+    push FAT_SEG    ; читаем в следующий сегмент
+    pop es
+    mov cx,50;110;word [BPB_ADDRESS+0xB+11]        ; число секторов
+    mov	bx,FAT_ADDR;0x9300
+    call    ReadSect
+    pop es              ; восстанавливаем es
+    cmp ah,00
+    jne FAILURE_FAT
+
+    ;add ax,112
+
+    ; Читаем FAT
+    ;push word 0x2000    ; читаем в следующий сегмент
+    ;pop es
+    ;mov cx,10;word [BPB_ADDRESS+0xB+11]        ; число секторов
+    ;mov	bx,[FAT_ADDR];0x9300
+    ;call    ReadSect
+
+LoadFile3:
+    ; Поиск файла в Корневом каталоге
+    mov cx,word [BPB_ADDRESS+0xB+6]
+    mov di,ROOT_ADDRESS
+loop_find3:
+    push cx
+    mov cx,11
+    mov si,ImageName3
+    push di
+    rep cmpsb
+    pop di
+    pop cx
+    je  LOAD_IMAGE3
+    add di,32
+    loop loop_find3
+    jmp FAILURE_FIND
+
+LOAD_IMAGE3:
+    ; Сохраняем стартовый кластер найденного файла
+    mov dx,[di+0x001A]
+    mov word [Cluster],dx
+
+    ;mov ax,word [Cluster]
+    ;call	PRINT_WORD
+
+    ; Читаем кластер файла
+    push es
+    push FILE_SEG2    ; читаем в следующий сегмент
+    pop es
+    mov ax,word [Cluster]
+    call ClusterLBA
+    xor cx,cx
+    mov cl,10;byte [BPB_ADDRESS+0xB+2]
+    mov	bx,0x0100;0x0100;FILE_ADDR2
+    call    ReadSect
+    cmp ah,00
+    jne FAILURE_FILE
+    xor ax,ax
+    mov word [es:0xFFFE],ax
+    mov ax,0x20CD
+    mov word [es:0x0000],ax
+    mov ax,cs
+    mov word [es:0x0016],ax
+
+
+    pop es
+
+
+
+    push FILE_SEG2
+    pop ds
+    push FILE_SEG2
+    pop ss
+    push FILE_SEG2
+    pop fs
+    push FILE_SEG2
+    pop gs
+    push FILE_SEG2
+    pop es
+
+    ;lea si,[return_from]
+    ;mov word [es:0x0018],si
+
+
+    mov	bp,0xFFFE	; Устанавливаем адрес стека
+    mov	sp,bp
+
+
+    jmp FILE_SEG2:0x0100
+
+return_from:
+    ret
+
+
+
+
+
+
+
+
+
+    ; вывод слова на экран
+; ax — выводимое слово
+PRINT_WORD:
+				push	ax
+				mov 	al, ah
+				call 	PRINT_BYTE	; выводим старший байт
+				pop 	ax
+				call 	PRINT_BYTE 	; выводим младший байт
+				ret
+
+
+; вывод байта на экран
+; al — выводимый байт
+PRINT_BYTE:
+				push 	ax
+				mov 	ah, al
+				shr		al, 04h
+				call 	PRINT_DIGIT
+				mov 	al, ah
+				and		al, 0Fh
+				call 	PRINT_DIGIT
+				pop 	ax
+				ret
+
+
+; перевод 4-ёх бит в 16-тиричный символ и вывод на экран
+; al — выводимый байт
+PRINT_DIGIT:
+				push	ax
+				pushf
+				cmp 	al, 0Ah
+				jae 	m1 ; если al больше или равно 10, то переход
+				add 	al, 30h ; складываем с кодом символа «0» (48дес)
+				jmp 	m2
+m1:
+				add 	al, 37h ; складываем с кодом символа «7» (55дес). Если al = 10, то 55 + 10 = 65 — код выводимого символа «A»
+m2:
+				xor 	ah, ah ; ah = 0, равносильно 1-му выводимому символу
+				call 	to_show
+				popf
+				pop 	ax
+				ret
+
+
+
+to_show:
+				push	si
+				mov		[char],al ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; без[]
+				lea		si,[char]
+				;Write
+                    push si
+                mov ah,1
+				int 0x21
+                    pop si
+				;call	Write
+				pop		si
+				ret
+
+char			DB "@",0
